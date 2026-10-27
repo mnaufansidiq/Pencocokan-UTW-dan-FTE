@@ -158,44 +158,92 @@ async function callWorker(prompt,ms=90000){
   throw last;
 }
 const parseJ=t=>JSON.parse(t.replace(/```json|```/g,"").trim().replace(/^[^{]*/,"").replace(/[^}]*$/,""));
-const mkPrompt=(items,F)=>`Kamu analis jabatan yang teliti dan konservatif. Tugasmu: menilai kesesuaian SUBSTANSI (makna kegiatan, bukan kesamaan kata) antara setiap uraian tugas UTW dan daftar uraian FTE.
-
-KRITERIA (terapkan ketat dan konsisten):
+const CRIT=`KRITERIA (terapkan ketat dan konsisten):
 - Sesuai: ada FTE yang kegiatan intinya, objeknya, dan tujuannya sama dengan UTW; hanya berbeda redaksi atau tingkat rincian.
 - Sebagian: ada FTE yang menyangkut kegiatan/objek yang sama tetapi cakupannya hanya sebagian dari UTW (atau UTW hanya sebagian dari FTE), atau hanya salah satu langkahnya yang tercakup.
-- Tidak: tidak ada FTE yang cakupannya sama. Jangan menebak. Kemiripan kata umum (barang, unit, data, koordinasi) BUKAN alasan untuk menilai Sesuai atau Sebagian.
-Satu UTW boleh punya beberapa FTE. Baca SELURUH daftar FTE sebelum memilih. Alasan harus menyebut kegiatan FTE yang dipakai, dalam satu kalimat.
-
-Balas HANYA JSON valid, tanpa teks lain dan tanpa pagar kode:
+- Tidak: tidak ada FTE yang cakupannya sama. Jangan menebak. Kemiripan kata umum (barang, unit, data, koordinasi, laporan, rapat, sistem) BUKAN alasan untuk Sesuai atau Sebagian. UTW yang bersifat umum atau normatif (misalnya "melaksanakan tugas sehari-hari", "menjamin program mutu") hanya cocok bila ada FTE yang secara eksplisit membahas hal yang sama.
+- Pilih paling banyak 3 FTE per UTW, hanya yang benar-benar relevan.`;
+const FMT=`Balas HANYA JSON valid, tanpa teks lain dan tanpa pagar kode:
 {"hasil":[{"u":1,"f":[2,5],"s":"Sesuai","alasan":"..."}]}
-Buat satu objek untuk SETIAP UTW di bawah (jangan ada yang terlewat). "u" = nomor UTW persis seperti pada daftar. "f" = nomor FTE yang cocok (kosong jika tidak ada). "s" hanya: Sesuai, Sebagian, atau Tidak.
+"u" = nomor UTW persis seperti pada daftar. "f" = nomor FTE yang cocok (kosong jika status Tidak; wajib terisi jika Sesuai atau Sebagian). "s" HANYA salah satu kata ini: Sesuai, Sebagian, Tidak (tanpa tambahan apa pun). "alasan" = satu kalimat yang menjelaskan MENGAPA cocok atau tidak, dengan menyebut nomor FTE. JANGAN menyalin ulang teks UTW ke "alasan". Contoh alasan: "FTE 3 mencakup pendampingan instalasi oleh vendor yang sama dengan UTW." atau "Tidak ada FTE yang membahas penyimpanan barang ke gudang."`;
+const mkPrompt=(items,F)=>`Kamu analis jabatan yang teliti dan konservatif. Tugasmu: menilai kesesuaian SUBSTANSI (makna kegiatan, bukan kesamaan kata) antara setiap uraian tugas UTW dan daftar uraian FTE.
+
+${CRIT}
+Baca SELURUH daftar FTE sebelum memilih. Buat satu objek untuk SETIAP UTW di bawah (jangan ada yang terlewat).
+
+${FMT}
 
 DAFTAR UTW:
 ${items.map(([n,x])=>n+". "+x).join("\n")}
 
 DAFTAR FTE:
 ${F.map((x,i)=>(i+1)+". "+x).join("\n")}`;
-async function askPart(items,F,models){
+const mkVerify=(rows,F)=>`Kamu pemeriksa mutu analisis jabatan yang SKEPTIS. Di bawah ini hasil pencocokan awal UTW dengan FTE. Periksa ulang setiap butir: apakah FTE yang dipilih benar-benar mencakup kegiatan UTW? Turunkan status (Sesuai menjadi Sebagian, atau Sebagian menjadi Tidak) dan/atau buang FTE yang tidak relevan bila kecocokannya hanya karena kata umum mirip. Naikkan status hanya bila penilaian awal jelas keliru. Pertahankan bila sudah tepat.
+
+${CRIT}
+
+${FMT}
+Buat satu objek untuk SETIAP butir di bawah.
+
+HASIL AWAL:
+${rows.map(r=>r.u+". UTW: "+r.text+"\n   Status awal: "+r.s+"\n   FTE terpilih:\n"+r.f.map(k=>"   - FTE "+k+": "+F[k-1]).join("\n")).join("\n\n")}`;
+const OKS=["Sesuai","Sebagian","Tidak"];
+function normS(s){s=String(s||"").trim();const m=OKS.find(o=>o.toLowerCase()===s.toLowerCase());if(m)return m;
+  if(/^tidak/i.test(s)&&s.length<20)return "Tidak";if(/^sebagian/i.test(s)&&s.length<20)return "Sebagian";if(/^sesuai/i.test(s)&&s.length<20)return "Sesuai";return null}
+const flat=x=>String(x).toLowerCase().replace(/[^a-z0-9 ]/g,"").replace(/\s+/g," ").trim();
+function cleanItem(h,nF,utxt,lenient){
+  if(!h)return null;
+  let s=normS(h.s);
+  let f=Array.isArray(h.f)?h.f.map(Number).filter(n=>Number.isInteger(n)&&n>=1&&n<=nF):[];
+  f=[...new Set(f)].slice(0,3);
+  const al=String(h.alasan||"").trim();
+  const echo=flat(al).startsWith(flat(utxt).slice(0,25));
+  const ok=s&&(s==="Tidak"||f.length)&&al.length>=15&&!echo;
+  if(ok)return{u:h.u,s,f:s==="Tidak"?[]:f,alasan:al};
+  if(!lenient)return null;
+  if(!s||(s!=="Tidak"&&!f.length))return{u:h.u,s:"Tidak",f:[],alasan:"Jawaban AI tidak valid untuk uraian ini, periksa manual."};
+  return{u:h.u,s,f:s==="Tidak"?[]:f,alasan:echo||al.length<15?"(AI tidak memberi penjelasan, periksa manual)":al};
+}
+async function askRound(prompt,models){
   let j;
   for(let a=1;a<=2;a++){
-    try{const r=await callWorker(mkPrompt(items,F));models.add(r.provider+" ("+r.modelUsed+")");j=parseJ(r.text);break}
+    try{const r=await callWorker(prompt);models.add(r.provider+" ("+r.modelUsed+")");j=parseJ(r.text);break}
     catch(e){if(a===2)throw e}
   }
   return j.hasil||[];
+}
+async function askPart(items,F,models){
+  const done=new Map(),raw=new Map();
+  let todo=items;
+  for(let round=1;round<=3&&todo.length;round++){
+    const got=await askRound(mkPrompt(todo,F),models);
+    todo.forEach(([n,x])=>{const h=got.find(g=>Number(g.u)===n);if(h)raw.set(n,h);const c=cleanItem(h&&{...h,u:n},F.length,x,false);if(c)done.set(n,c)});
+    todo=items.filter(([n])=>!done.has(n));
+  }
+  items.forEach(([n,x])=>{if(!done.has(n))done.set(n,cleanItem(raw.has(n)?{...raw.get(n),u:n}:{u:n},F.length,x,true))});
+  return items.map(([n])=>done.get(n));
+}
+async function verifyPart(rows,F,models){
+  const got=await askRound(mkVerify(rows,F),models);
+  return rows.map(r=>{const c=cleanItem(got.find(g=>Number(g.u)===r.n)&&{...got.find(g=>Number(g.u)===r.n),u:r.n},F.length,r.text,false);return c||null});
 }
 $("#go").onclick=async()=>{
   const U=lines("U"),F=lines("F");
   if(!U.length||!F.length)return msg("Isi uraian UTW dan FTE terlebih dahulu.",1);
   $("#go").disabled=true;
-  const hasil=[],models=new Set(),n=Math.ceil(U.length/CHUNK);
+  const models=new Set(),hasil=[],n=Math.ceil(U.length/CHUNK);
   try{
     for(let c=0;c<n;c++){
-      msg(`AI sedang mencocokkan (${c+1} dari ${n}), bisa memakan waktu beberapa saat…`);
+      msg(`Tahap 1: AI mencocokkan (${c+1} dari ${n})…`);
       const st=c*CHUNK,items=U.slice(st,st+CHUNK).map((x,i)=>[st+i+1,x]);
-      let got=await askPart(items,F,models);
-      const miss=items.filter(([nn])=>!got.some(h=>h.u===nn));
-      if(miss.length)got=got.concat(await askPart(miss,F,models));
-      got.forEach(h=>hasil.push(h));
+      (await askPart(items,F,models)).forEach(h=>hasil.push(h));
+    }
+    const cand=hasil.filter(h=>h.s!=="Tidak");
+    for(let st=0;st<cand.length;st+=CHUNK){
+      msg("Tahap 2: AI memeriksa ulang kecocokan yang terlalu longgar…");
+      const part=cand.slice(st,st+CHUNK).map(h=>({n:h.u,u:h.u,text:U[h.u-1],s:h.s,f:h.f}));
+      let v=null;try{v=await verifyPart(part,F,models)}catch(e){v=null}
+      if(v)v.forEach((nv,i)=>{if(nv){const k=hasil.findIndex(h=>h.u===part[i].n);hasil[k]=nv}});
     }
     const used=new Set(hasil.flatMap(h=>h.s==="Tidak"?[]:(h.f||[])));
     R={U,F,hasil,fx:F.map((_,i)=>i+1).filter(i=>!used.has(i))};
