@@ -59,12 +59,12 @@ td .chip{display:inline-block;font-size:12px;padding:3px 9px}
 <div class="bar"><button class="btn" id="go">Cocokkan dengan AI</button><span id="msg"></span></div>
 
 <section id="out" class="hidden">
-  <label class="hint" style="display:block;margin:8px 0"><input type="checkbox" id="exc" checked> Keluarkan UTW Umum dari penyebut (ikuti pedoman analisis jabatan). Jika dimatikan, UTW Umum tetap dihitung dengan skor 0.</label>
+
   <div class="sum" id="sum"></div>
   <div class="bar"><button class="btn sec" id="dl">Unduh sebagai Word (.docx)</button></div>
   <div class="card tw"><table><thead><tr><th>No</th><th>Uraian UTW</th><th>Uraian FTE yang sesuai</th><th>Status</th><th>Skor</th><th>Alasan</th></tr></thead><tbody id="tb"></tbody></table></div>
   <div class="card" style="margin-top:14px"><h2>FTE tanpa padanan di UTW</h2><div class="hint" style="margin:0 0 6px">Uraian FTE yang tidak ada secara spesifik di UTW.</div><ul id="fx"></ul></div>
-  <p class="hint">Hasil AI adalah pemetaan awal. Status tiap baris bisa diubah lewat dropdown (ringkasan dan persentase ikut berubah, dan file Word yang diunduh mengikuti). "Umum" = uraian UTW yang terlalu umum. Secara bawaan tidak dinilai dan tidak masuk penyebut; centang di atas ringkasan mengatur apakah Umum dikeluarkan atau tetap dihitung 0, sesuaikan dengan pedoman analisis jabatan di tempatmu. Periksa kembali sebelum dipakai untuk dokumen resmi.</p>
+  <p class="hint">Hasil AI adalah pemetaan awal. Status tiap baris bisa diubah lewat dropdown (ringkasan dan persentase ikut berubah, dan file Word yang diunduh mengikuti). Periksa kembali sebelum dipakai untuk dokumen resmi.</p>
 </section>
 </main>
 <script>
@@ -163,11 +163,11 @@ const parseJ=t=>JSON.parse(t.replace(/```json|```/g,"").trim().replace(/^[^{]*/,
 const CRIT=`KRITERIA (terapkan ketat dan konsisten):
 - Sesuai: ada FTE yang kegiatan intinya, objeknya, dan tujuannya sama dengan UTW; hanya berbeda redaksi atau tingkat rincian.
 - Sebagian: ada FTE yang menyangkut kegiatan/objek yang sama tetapi cakupannya hanya sebagian dari UTW (atau UTW hanya sebagian dari FTE), atau hanya salah satu langkahnya yang tercakup.
-- Tidak: tidak ada FTE yang cakupannya sama. Jangan menebak. Kemiripan kata umum (barang, unit, data, koordinasi, laporan, rapat, sistem) BUKAN alasan untuk Sesuai atau Sebagian. UTW yang bersifat umum atau normatif diberi status Umum (lihat di bawah), bukan dipaksakan ke FTE yang hanya mirip kata.
+- Tidak: tidak ada FTE yang cakupannya sama. Jangan menebak. Kemiripan kata umum (barang, unit, data, koordinasi, laporan, rapat, sistem) BUKAN alasan untuk Sesuai atau Sebagian.
 - Pilih paling banyak 3 FTE per UTW, hanya yang benar-benar relevan.`;
 const FMT=`Balas HANYA JSON valid, tanpa teks lain dan tanpa pagar kode:
 {"hasil":[{"u":1,"f":[2,5],"s":"Sesuai","alasan":"..."}]}
-"u" = nomor UTW persis seperti pada daftar. "f" = nomor FTE yang cocok (kosong jika status Tidak atau Umum; wajib terisi jika Sesuai atau Sebagian). "s" HANYA salah satu kata ini: Sesuai, Sebagian, Tidak, Umum (tanpa tambahan apa pun). Umum = uraian UTW yang sangat umum atau normatif sehingga tidak bisa dipasangkan ke kegiatan FTE tertentu (misalnya "melaksanakan tugas sehari-hari sesuai arahan atasan" atau program/kewajiban institusi yang tidak merujuk kegiatan spesifik). Untuk Umum, "f" kosong dan alasan menjelaskan mengapa terlalu umum. Pakai Umum hanya bila benar-benar tidak ada kegiatan spesifik yang bisa diperiksa; jika ada kegiatan spesifik, nilai dengan Sesuai, Sebagian, atau Tidak. "alasan" = satu kalimat yang menjelaskan MENGAPA cocok atau tidak, dengan menyebut nomor FTE. JANGAN menyalin ulang teks UTW ke "alasan". Contoh alasan: "FTE 3 mencakup pendampingan instalasi oleh vendor yang sama dengan UTW." atau "Tidak ada FTE yang membahas penyimpanan barang ke gudang."`;
+"u" = nomor UTW persis seperti pada daftar. "f" = nomor FTE yang cocok (kosong jika status Tidak; wajib terisi jika Sesuai atau Sebagian). "s" HANYA salah satu kata ini: Sesuai, Sebagian, Tidak (tanpa tambahan apa pun). "alasan" = satu kalimat yang menjelaskan MENGAPA cocok atau tidak, dengan menyebut nomor FTE. JANGAN menyalin ulang teks UTW ke "alasan". Contoh alasan: "FTE 3 mencakup pendampingan instalasi oleh vendor yang sama dengan UTW." atau "Tidak ada FTE yang membahas penyimpanan barang ke gudang."`;
 const mkPrompt=(items,F)=>`Kamu analis jabatan yang teliti dan konservatif. Tugasmu: menilai kesesuaian SUBSTANSI (makna kegiatan, bukan kesamaan kata) antara setiap uraian tugas UTW dan daftar uraian FTE.
 
 ${CRIT}
@@ -189,9 +189,9 @@ Buat satu objek untuk SETIAP butir di bawah.
 
 HASIL AWAL:
 ${rows.map(r=>r.u+". UTW: "+r.text+"\n   Status awal: "+r.s+"\n   FTE terpilih:\n"+r.f.map(k=>"   - FTE "+k+": "+F[k-1]).join("\n")).join("\n\n")}`;
-const OKS=["Sesuai","Sebagian","Tidak","Umum"];
+const OKS=["Sesuai","Sebagian","Tidak"];
 function normS(s){s=String(s||"").trim();const m=OKS.find(o=>o.toLowerCase()===s.toLowerCase());if(m)return m;
-  if(/^tidak/i.test(s)&&s.length<20)return "Tidak";if(/^umum/i.test(s)&&s.length<20)return "Umum";if(/^sebagian/i.test(s)&&s.length<20)return "Sebagian";if(/^sesuai/i.test(s)&&s.length<20)return "Sesuai";return null}
+  if(/^tidak/i.test(s)&&s.length<20)return "Tidak";if(/^sebagian/i.test(s)&&s.length<20)return "Sebagian";if(/^sesuai/i.test(s)&&s.length<20)return "Sesuai";return null}
 const flat=x=>String(x).toLowerCase().replace(/[^a-z0-9 ]/g,"").replace(/\s+/g," ").trim();
 function cleanItem(h,nF,utxt,lenient){
   if(!h)return null;
@@ -200,7 +200,7 @@ function cleanItem(h,nF,utxt,lenient){
   f=[...new Set(f)].slice(0,3);
   const al=String(h.alasan||"").trim();
   const echo=flat(al).startsWith(flat(utxt).slice(0,25));
-  const nof=s==="Tidak"||s==="Umum";
+  const nof=s==="Tidak";
   const ok=s&&(nof||f.length)&&al.length>=15&&!echo;
   if(ok)return{u:h.u,s,f:nof?[]:f,alasan:al};
   if(!lenient)return null;
@@ -241,14 +241,14 @@ $("#go").onclick=async()=>{
       const st=c*CHUNK,items=U.slice(st,st+CHUNK).map((x,i)=>[st+i+1,x]);
       (await askPart(items,F,models)).forEach(h=>hasil.push(h));
     }
-    const cand=hasil.filter(h=>h.s!=="Tidak"&&h.s!=="Umum");
+    const cand=hasil.filter(h=>h.s!=="Tidak");
     for(let st=0;st<cand.length;st+=CHUNK){
       msg("Tahap 2: AI memeriksa ulang kecocokan yang terlalu longgar…");
       const part=cand.slice(st,st+CHUNK).map(h=>({n:h.u,u:h.u,text:U[h.u-1],s:h.s,f:h.f}));
       let v=null;try{v=await verifyPart(part,F,models)}catch(e){v=null}
       if(v)v.forEach((nv,i)=>{if(nv){const k=hasil.findIndex(h=>h.u===part[i].n);hasil[k]=nv}});
     }
-    const used=new Set(hasil.flatMap(h=>(h.s==="Tidak"||h.s==="Umum")?[]:(h.f||[])));
+    const used=new Set(hasil.flatMap(h=>h.s==="Tidak"?[]:(h.f||[])));
     R={U,F,hasil,fx:F.map((_,i)=>i+1).filter(i=>!used.has(i))};
     render();
     const m=[...models].join(", "),fb=/workers-ai/i.test(m);
@@ -257,50 +257,43 @@ $("#go").onclick=async()=>{
   $("#go").disabled=false;
 };
 
-const STS=["Sesuai","Sebagian","Tidak","Umum"],normStat=x=>STS.includes(x)?x:"Tidak";
+const STS=["Sesuai","Sebagian","Tidak"],normStat=x=>STS.includes(x)?x:"Tidak";
 function rowsOf(){return R.U.map((u,i)=>{const h=R.hasil.find(x=>x.u===i+1)||{f:[],s:"Tidak",alasan:"-"};
   const ov=(R.ovr||{})[i+1];
   return{no:i+1,u,f:(h.f||[]).map(n=>R.F[n-1]).filter(Boolean),s:ov||normStat(h.s),a:h.alasan||"-"}})}
-const SK={Sesuai:1,Sebagian:0.5,Tidak:0,Umum:0},fmt=n=>String(n).replace(".",",");
-function total(rs){const um=rs.filter(r=>r.s==="Umum").length,n=rs.length-um,t=rs.reduce((a,r)=>a+(SK[r.s]??0),0),r1=x=>Math.round(x*1000)/10;
-  return{t,n,um,all:rs.length,p:n?r1(t/n):0,pAll:rs.length?r1(t/rs.length):0}}
-const EXC=()=>{const e=$("#exc");return !e||e.checked};
-function pct(T){return EXC()
-  ?{m:[`Tingkat kesesuaian (UTW spesifik: total skor ÷ ${T.n})`,T.p],c:[`Pembanding: semua UTW dihitung (${T.all} uraian, Umum = 0)`,T.pAll],n:T.n,u:"Umum (tidak dinilai)",tl:"Total dinilai"}
-  :{m:[`Tingkat kesesuaian (semua UTW dihitung: total skor ÷ ${T.all}, Umum = 0)`,T.pAll],c:[`Pembanding: UTW Umum dikeluarkan (${T.n} uraian spesifik)`,T.p],n:T.all,u:"Umum (dihitung, skor 0)",tl:"Total dihitung"}}
+const SK={Sesuai:1,Sebagian:0.5,Tidak:0},fmt=n=>String(n).replace(".",",");
+function total(rs){const n=rs.length,t=rs.reduce((a,r)=>a+(SK[r.s]??0),0),r1=x=>Math.round(x*1000)/10;
+  return{t,n,p:n?r1(t/n):0}}
 function render(first=true){
-  const rs=rowsOf(),c={Sesuai:0,Sebagian:0,Tidak:0,Umum:0};rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
-  const T=total(rs),PC=pct(T);
-  $("#sum").innerHTML=`<table style="min-width:0;width:auto"><thead><tr><th>Status</th><th>Skor per uraian</th><th>Jumlah uraian</th><th>Subtotal skor</th></tr></thead><tbody><tr><td>Sesuai</td><td>1</td><td>${c.Sesuai}</td><td>${fmt(c.Sesuai)}</td></tr><tr><td>Sebagian</td><td>0,5</td><td>${c.Sebagian}</td><td>${fmt(c.Sebagian*0.5)}</td></tr><tr><td>Tidak sesuai</td><td>0</td><td>${c.Tidak}</td><td>0</td></tr><tr><td>${PC.u}</td><td>${EXC()?"-":"0"}</td><td>${c.Umum}</td><td>${EXC()?"-":"0"}</td></tr><tr><th>${PC.tl}</th><th></th><th>${PC.n}</th><th>${fmt(T.t)}</th></tr><tr><th colspan="3">${PC.m[0]}</th><th>${fmt(PC.m[1])}%</th></tr><tr><td colspan="3">${PC.c[0]}</td><td>${fmt(PC.c[1])}%</td></tr></tbody></table>`;
-  $("#tb").innerHTML=rs.map(r=>`<tr><td>${r.no}</td><td>${esc(r.u)}</td><td>${r.f.length?r.f.map(esc).join("<br><br>"):"-"}</td><td><select class="st ${r.s}" data-n="${r.no}">${STS.map(o=>`<option value="${o}"${o===r.s?" selected":""}>${o==="Tidak"?"Tidak sesuai":o}</option>`).join("")}</select></td><td>${r.s==="Umum"?"-":fmt(SK[r.s]??0)}</td><td>${esc(r.a)}</td></tr>`).join("");
+  const rs=rowsOf(),c={Sesuai:0,Sebagian:0,Tidak:0};rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
+  const T=total(rs);
+  $("#sum").innerHTML=`<table style="min-width:0;width:auto"><thead><tr><th>Status</th><th>Skor per uraian</th><th>Jumlah uraian</th><th>Subtotal skor</th></tr></thead><tbody><tr><td>Sesuai</td><td>1</td><td>${c.Sesuai}</td><td>${fmt(c.Sesuai)}</td></tr><tr><td>Sebagian</td><td>0,5</td><td>${c.Sebagian}</td><td>${fmt(c.Sebagian*0.5)}</td></tr><tr><td>Tidak sesuai</td><td>0</td><td>${c.Tidak}</td><td>0</td></tr><tr><th>Total</th><th></th><th>${T.n}</th><th>${fmt(T.t)}</th></tr><tr><th colspan="3">Tingkat kesesuaian (total skor ÷ ${T.n} UTW)</th><th>${fmt(T.p)}%</th></tr></tbody></table>`;
+  $("#tb").innerHTML=rs.map(r=>`<tr><td>${r.no}</td><td>${esc(r.u)}</td><td>${r.f.length?r.f.map(esc).join("<br><br>"):"-"}</td><td><select class="st ${r.s}" data-n="${r.no}">${STS.map(o=>`<option value="${o}"${o===r.s?" selected":""}>${o==="Tidak"?"Tidak sesuai":o}</option>`).join("")}</select></td><td>${fmt(SK[r.s]??0)}</td><td>${esc(r.a)}</td></tr>`).join("");
   $("#fx").innerHTML=R.fx.length?R.fx.map(n=>`<li>${esc(R.F[n-1]||"")}</li>`).join(""):"<li>Semua FTE punya padanan.</li>";
   $("#out").classList.remove("hidden");if(first)$("#out").scrollIntoView({behavior:"smooth"});
 }
 
-$("#exc").onchange=()=>{if(R)render(false)};
 $("#tb").onchange=e=>{const el=e.target.closest("select.st");if(!el||!R)return;R.ovr=R.ovr||{};R.ovr[+el.dataset.n]=el.value;render(false)};
 const P=(t,b)=>`<w:p><w:r>${b?"<w:rPr><w:b/></w:rPr>":""}<w:t xml:space="preserve">${esc(t)}</w:t></w:r></w:p>`;
 const TC=(t,w,b,fill)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${fill?`<w:shd w:val="clear" w:fill="${fill}"/>`:""}</w:tcPr>${String(t).split("\n").map(x=>P(x,b)).join("")}</w:tc>`;
 function sumDoc(c,rs){
-  const T=total(rs),PC=pct(T),W=[4200,2200,2200,2200];
+  const T=total(rs),W=[4200,2200,2200,2200];
   const r=(a,b,fl)=>`<w:tr>${a.map((t,i)=>TC(t,W[i],b,fl)).join("")}</w:tr>`;
   return `<w:tbl><w:tblPr><w:tblW w:w="10800" w:type="dxa"/><w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(s=>`<w:${s} w:val="single" w:sz="4" w:color="808080"/>`).join("")}</w:tblBorders></w:tblPr>`+
     r(["Status","Skor per uraian","Jumlah uraian","Subtotal skor"],1,"D9E2F3")+
     r(["Sesuai","1",c.Sesuai,fmt(c.Sesuai)])+
     r(["Sebagian","0,5",c.Sebagian,fmt(c.Sebagian*0.5)])+
     r(["Tidak sesuai","0",c.Tidak,"0"])+
-    r([PC.u,EXC()?"-":"0",c.Umum,EXC()?"-":"0"])+
-    r([PC.tl,"",PC.n,fmt(T.t)],1,"F2F2F2")+
-    r([PC.m[0],"","",fmt(PC.m[1])+"%"],1,"F2F2F2")+
-    r([PC.c[0],"","",fmt(PC.c[1])+"%"])+`</w:tbl>`+P("");
+    r(["Total","",T.n,fmt(T.t)],1,"F2F2F2")+
+    r([`Tingkat kesesuaian (total skor ÷ ${T.n} UTW)`,"","",fmt(T.p)+"%"],1,"F2F2F2")+`</w:tbl>`+P("");
 }
 $("#dl").onclick=async()=>{
   const W=[600,3900,3900,1300,800,3400],rs=rowsOf();
   const row=(cells,b,fill)=>`<w:tr>${cells.map((t,i)=>TC(t,W[i],b,fill)).join("")}</w:tr>`;
   const tbl=`<w:tbl><w:tblPr><w:tblW w:w="13900" w:type="dxa"/><w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(s=>`<w:${s} w:val="single" w:sz="4" w:color="808080"/>`).join("")}</w:tblBorders></w:tblPr>`+
     row(["No","Uraian UTW","Uraian FTE yang sesuai","Status","Skor","Alasan"],1,"D9E2F3")+
-    rs.map(r=>row([r.no,r.u,r.f.length?r.f.join("\n\n"):"-",r.s==="Tidak"?"Tidak sesuai":r.s,r.s==="Umum"?"-":fmt(SK[r.s]??0),r.a])).join("")+`</w:tbl>`;
-  const c={Sesuai:0,Sebagian:0,Tidak:0,Umum:0};rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
+    rs.map(r=>row([r.no,r.u,r.f.length?r.f.join("\n\n"):"-",r.s==="Tidak"?"Tidak sesuai":r.s,fmt(SK[r.s]??0),r.a])).join("")+`</w:tbl>`;
+  const c={Sesuai:0,Sebagian:0,Tidak:0};rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
   const body=P("Hasil Pencocokan Substansi UTW dan FTE",1)+sumDoc(c,rs)+tbl+P("")+P("FTE tanpa padanan di UTW",1)+
     (R.fx.length?R.fx.map(n=>P("• "+(R.F[n-1]||""))).join(""):P("Semua FTE punya padanan."));
   const doc=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/></w:sectPr></w:body></w:document>`;
