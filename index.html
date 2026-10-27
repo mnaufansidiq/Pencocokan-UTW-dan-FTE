@@ -145,7 +145,7 @@ async function callWorker(prompt,ms=90000){
   for(let a=1;a<=2;a++){
     const ac=new AbortController(),t=setTimeout(()=>ac.abort(),ms);
     try{
-      const r=await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt}),signal:ac.signal});
+      const r=await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt,timeoutMs:80000,maxTokens:8192}),signal:ac.signal});
       clearTimeout(t);
       let d=null;try{d=await r.json()}catch(e){}
       if(!r.ok){
