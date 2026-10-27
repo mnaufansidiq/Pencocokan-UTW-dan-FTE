@@ -137,7 +137,7 @@ $("#both").onchange=async()=>{
 };
 /* ==== KONFIGURASI: URL Cloudflare Worker (kirim {prompt}, balasan {text}) ==== */
 const WORKER_URL="https://so-proxy.mnaufansidiq.workers.dev/";
-const CHUNK=10; // jumlah uraian UTW per permintaan AI
+const CHUNK=40; // jumlah uraian UTW per permintaan AI (semua sekaligus bila ≤ 40)
 async function callWorker(prompt,ms=90000){
   let last;
   for(let a=1;a<=2;a++){
@@ -152,39 +152,56 @@ async function callWorker(prompt,ms=90000){
       }
       const text=(d&&d.text||"").trim();
       if(!text)throw new Error("AI tidak memberikan hasil.");
-      return text;
+      return {text,provider:(d&&d.provider)||"?",modelUsed:(d&&d.modelUsed)||"?"};
     }catch(e){clearTimeout(t);last=e.name==="AbortError"?new Error("AI tidak merespons (timeout)."):e;if(a===2)break}
   }
   throw last;
 }
 const parseJ=t=>JSON.parse(t.replace(/```json|```/g,"").trim().replace(/^[^{]*/,"").replace(/[^}]*$/,""));
+const mkPrompt=(items,F)=>`Kamu analis jabatan yang teliti dan konservatif. Tugasmu: menilai kesesuaian SUBSTANSI (makna kegiatan, bukan kesamaan kata) antara setiap uraian tugas UTW dan daftar uraian FTE.
+
+KRITERIA (terapkan ketat dan konsisten):
+- Sesuai: ada FTE yang kegiatan intinya, objeknya, dan tujuannya sama dengan UTW; hanya berbeda redaksi atau tingkat rincian.
+- Sebagian: ada FTE yang menyangkut kegiatan/objek yang sama tetapi cakupannya hanya sebagian dari UTW (atau UTW hanya sebagian dari FTE), atau hanya salah satu langkahnya yang tercakup.
+- Tidak: tidak ada FTE yang cakupannya sama. Jangan menebak. Kemiripan kata umum (barang, unit, data, koordinasi) BUKAN alasan untuk menilai Sesuai atau Sebagian.
+Satu UTW boleh punya beberapa FTE. Baca SELURUH daftar FTE sebelum memilih. Alasan harus menyebut kegiatan FTE yang dipakai, dalam satu kalimat.
+
+Balas HANYA JSON valid, tanpa teks lain dan tanpa pagar kode:
+{"hasil":[{"u":1,"f":[2,5],"s":"Sesuai","alasan":"..."}]}
+Buat satu objek untuk SETIAP UTW di bawah (jangan ada yang terlewat). "u" = nomor UTW persis seperti pada daftar. "f" = nomor FTE yang cocok (kosong jika tidak ada). "s" hanya: Sesuai, Sebagian, atau Tidak.
+
+DAFTAR UTW:
+${items.map(([n,x])=>n+". "+x).join("\n")}
+
+DAFTAR FTE:
+${F.map((x,i)=>(i+1)+". "+x).join("\n")}`;
+async function askPart(items,F,models){
+  let j;
+  for(let a=1;a<=2;a++){
+    try{const r=await callWorker(mkPrompt(items,F));models.add(r.provider+" ("+r.modelUsed+")");j=parseJ(r.text);break}
+    catch(e){if(a===2)throw e}
+  }
+  return j.hasil||[];
+}
 $("#go").onclick=async()=>{
   const U=lines("U"),F=lines("F");
   if(!U.length||!F.length)return msg("Isi uraian UTW dan FTE terlebih dahulu.",1);
   $("#go").disabled=true;
-  const hasil=[],n=Math.ceil(U.length/CHUNK);
+  const hasil=[],models=new Set(),n=Math.ceil(U.length/CHUNK);
   try{
     for(let c=0;c<n;c++){
-      msg(`AI sedang mencocokkan (${c+1} dari ${n})…`);
-      const st=c*CHUNK,part=U.slice(st,st+CHUNK);
-      const prompt=`Kamu analis jabatan. Cocokkan substansi (makna kegiatan, bukan kesamaan kata) setiap uraian tugas UTW dengan uraian FTE.
-Aturan: Sesuai = inti kegiatan sama; Sebagian = tumpang tindih sebagian atau cakupan berbeda; Tidak = tidak ada padanan. Satu UTW boleh punya beberapa FTE, dan sebaliknya.
-Balas HANYA JSON valid tanpa teks lain, tanpa pagar kode, format:
-{"hasil":[{"u":1,"f":[2,5],"s":"Sesuai","alasan":"satu kalimat singkat"}]}
-Buat satu objek untuk SETIAP uraian UTW di daftar UTW di bawah. "u" = nomor UTW persis seperti pada daftar. "f" = daftar nomor FTE yang cocok (kosong jika tidak ada). "s" hanya salah satu: Sesuai, Sebagian, Tidak.
-
-DAFTAR UTW:
-${part.map((x,i)=>(st+i+1)+". "+x).join("\n")}
-
-DAFTAR FTE:
-${F.map((x,i)=>(i+1)+". "+x).join("\n")}`;
-      let j;
-      for(let a=1;a<=2;a++){try{j=parseJ(await callWorker(prompt));break}catch(e){if(a===2)throw e}}
-      (j.hasil||[]).forEach(h=>hasil.push(h));
+      msg(`AI sedang mencocokkan (${c+1} dari ${n}), bisa memakan waktu beberapa saat…`);
+      const st=c*CHUNK,items=U.slice(st,st+CHUNK).map((x,i)=>[st+i+1,x]);
+      let got=await askPart(items,F,models);
+      const miss=items.filter(([nn])=>!got.some(h=>h.u===nn));
+      if(miss.length)got=got.concat(await askPart(miss,F,models));
+      got.forEach(h=>hasil.push(h));
     }
     const used=new Set(hasil.flatMap(h=>h.s==="Tidak"?[]:(h.f||[])));
     R={U,F,hasil,fx:F.map((_,i)=>i+1).filter(i=>!used.has(i))};
-    render();msg("");
+    render();
+    const m=[...models].join(", "),fb=/workers-ai/i.test(m);
+    msg("Dihasilkan oleh: "+m+(fb?" — ini model cadangan, hasilnya bisa kurang teliti. Coba lagi nanti saat model utama tersedia.":""),fb);
   }catch(e){msg("Gagal memproses: "+(e.message||e)+". Coba lagi, atau periksa Worker dan kuota AI.",1)}
   $("#go").disabled=false;
 };
