@@ -316,28 +316,24 @@ function dlExcel(){
     rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
     const lbl=s=>s==="Tidak"?"Tidak sesuai":s;
     const wb=XLSX.utils.book_new();
-    const ws1=XLSX.utils.aoa_to_sheet([
+    const aoa=[
       ["No","Uraian UTW","Uraian FTE yang sesuai","Status","Skor","Alasan"],
-      ...rs.map(r=>[r.no,r.u,r.f.length?r.f.join("\n\n"):"-",lbl(r.s),SK[r.s]??0,r.a])
-    ]);
-    ws1["!cols"]=[{wch:5},{wch:55},{wch:55},{wch:14},{wch:7},{wch:50}];
-    XLSX.utils.book_append_sheet(wb,ws1,"Pencocokan");
-    const ws2=XLSX.utils.aoa_to_sheet([
-      ["Status","Skor per uraian","Jumlah uraian","Subtotal skor"],
-      ["Sesuai",1,c.Sesuai,c.Sesuai],
-      ["Sebagian",0.5,c.Sebagian,c.Sebagian*0.5],
-      ["Tidak sesuai",0,c.Tidak,0],
-      ["Total","",T.n,T.t],
-      [`Tingkat kesesuaian (total skor ÷ ${T.n} UTW)`,"","",fmt(T.p)+"%"]
-    ]);
-    ws2["!cols"]=[{wch:42},{wch:16},{wch:15},{wch:15}];
-    XLSX.utils.book_append_sheet(wb,ws2,"Ringkasan");
-    const ws3=XLSX.utils.aoa_to_sheet([
-      ["FTE tanpa padanan di UTW"],
-      ...(R.fx.length?R.fx.map(n=>[R.F[n-1]||""]):[["Semua FTE punya padanan."]])
-    ]);
-    ws3["!cols"]=[{wch:100}];
-    XLSX.utils.book_append_sheet(wb,ws3,"FTE tanpa padanan");
+      ...rs.map(r=>[r.no,r.u,r.f.length?r.f.join("\n\n"):"-",lbl(r.s),SK[r.s]??0,r.a]),
+      [],
+      ["","Ringkasan"],
+      ["","Status","Skor per uraian","Jumlah uraian","Subtotal skor"],
+      ["","Sesuai",1,c.Sesuai,c.Sesuai],
+      ["","Sebagian",0.5,c.Sebagian,c.Sebagian*0.5],
+      ["","Tidak sesuai",0,c.Tidak,0],
+      ["","Total","",T.n,T.t],
+      ["",`Tingkat kesesuaian (total skor ÷ ${T.n} UTW)`,"","",fmt(T.p)+"%"],
+      [],
+      ["","FTE tanpa padanan di UTW"],
+      ...(R.fx.length?R.fx.map(n=>["",R.F[n-1]||""]):[["","Semua FTE punya padanan."]])
+    ];
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"]=[{wch:5},{wch:55},{wch:55},{wch:14},{wch:14},{wch:50}];
+    XLSX.utils.book_append_sheet(wb,ws,"Pencocokan");
     const out=XLSX.write(wb,{type:"array",bookType:"xlsx"});
     saveBlob(new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"Pencocokan_UTW_FTE.xlsx");msg("");
   }catch(e){msg("Gagal mengunduh: "+(e.message||e),1)}
