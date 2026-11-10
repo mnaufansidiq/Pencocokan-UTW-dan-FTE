@@ -38,7 +38,7 @@ td .chip{display:inline-block;font-size:12px;padding:3px 9px}
 <body>
 <main>
 <h1>Pencocokan Substansi UTW dan FTE</h1>
-<p class="sub">Unggah uraian tugas UTW dan FTE, AI mencocokkan berdasarkan makna, lalu hasilnya bisa diunduh sebagai dokumen Word.</p>
+<p class="sub">Unggah uraian tugas UTW dan FTE, AI mencocokkan berdasarkan makna, lalu hasilnya bisa diunduh sebagai dokumen Word atau Excel.</p>
 
 <div class="card" style="margin-bottom:14px"><h2>Satu file Excel berisi UTW dan FTE</h2>
   <input type="file" id="both" accept=".xlsx,.xls">
@@ -61,10 +61,10 @@ td .chip{display:inline-block;font-size:12px;padding:3px 9px}
 <section id="out" class="hidden">
 
   <div class="sum" id="sum"></div>
-  <div class="bar"><button class="btn sec" id="dl">Unduh sebagai Word (.docx)</button></div>
+  <div class="bar"><select id="fmtdl" style="margin-top:0"><option value="docx">Word (.docx)</option><option value="xlsx">Excel (.xlsx)</option></select><button class="btn sec" id="dl">Unduh</button></div>
   <div class="card tw"><table><thead><tr><th>No</th><th>Uraian UTW</th><th>Uraian FTE yang sesuai</th><th>Status</th><th>Skor</th><th>Alasan</th></tr></thead><tbody id="tb"></tbody></table></div>
   <div class="card" style="margin-top:14px"><h2>FTE tanpa padanan di UTW</h2><div class="hint" style="margin:0 0 6px">Uraian FTE yang tidak ada secara spesifik di UTW.</div><ul id="fx"></ul></div>
-  <p class="hint">Hasil AI adalah pemetaan awal. Status tiap baris bisa diubah lewat dropdown (ringkasan dan persentase ikut berubah, dan file Word yang diunduh mengikuti). Periksa kembali sebelum dipakai untuk dokumen resmi.</p>
+  <p class="hint">Hasil AI adalah pemetaan awal. Status tiap baris bisa diubah lewat dropdown (ringkasan dan persentase ikut berubah, dan file Word/Excel yang diunduh mengikuti). Periksa kembali sebelum dipakai untuk dokumen resmi.</p>
 </section>
 </main>
 <script>
@@ -287,7 +287,11 @@ function sumDoc(c,rs){
     r(["Total","",T.n,fmt(T.t)],1,"F2F2F2")+
     r([`Tingkat kesesuaian (total skor ÷ ${T.n} UTW)`,"","",fmt(T.p)+"%"],1,"F2F2F2")+`</w:tbl>`+P("");
 }
-$("#dl").onclick=async()=>{
+function saveBlob(blob,name){
+  const l=document.createElement("a");l.href=URL.createObjectURL(blob);l.download=name;
+  document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),5000);
+}
+async function dlWord(){
   const W=[600,3900,3900,1300,800,3400],rs=rowsOf();
   const row=(cells,b,fill)=>`<w:tr>${cells.map((t,i)=>TC(t,W[i],b,fill)).join("")}</w:tr>`;
   const tbl=`<w:tbl><w:tblPr><w:tblW w:w="13900" w:type="dxa"/><w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(s=>`<w:${s} w:val="single" w:sz="4" w:color="808080"/>`).join("")}</w:tblBorders></w:tblPr>`+
@@ -303,10 +307,42 @@ $("#dl").onclick=async()=>{
   z.file("word/document.xml",doc);
   try{
     const blob=await z.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
-    const l=document.createElement("a");l.href=URL.createObjectURL(blob);l.download="Pencocokan_UTW_FTE.docx";
-    document.body.appendChild(l);l.click();l.remove();setTimeout(()=>URL.revokeObjectURL(l.href),5000);msg("");
+    saveBlob(blob,"Pencocokan_UTW_FTE.docx");msg("");
   }catch(e){msg("Gagal mengunduh: "+(e.message||e),1)}
-};
+}
+function dlExcel(){
+  try{
+    const rs=rowsOf(),T=total(rs),c={Sesuai:0,Sebagian:0,Tidak:0};
+    rs.forEach(r=>c[r.s]=(c[r.s]||0)+1);
+    const lbl=s=>s==="Tidak"?"Tidak sesuai":s;
+    const wb=XLSX.utils.book_new();
+    const ws1=XLSX.utils.aoa_to_sheet([
+      ["No","Uraian UTW","Uraian FTE yang sesuai","Status","Skor","Alasan"],
+      ...rs.map(r=>[r.no,r.u,r.f.length?r.f.join("\n\n"):"-",lbl(r.s),SK[r.s]??0,r.a])
+    ]);
+    ws1["!cols"]=[{wch:5},{wch:55},{wch:55},{wch:14},{wch:7},{wch:50}];
+    XLSX.utils.book_append_sheet(wb,ws1,"Pencocokan");
+    const ws2=XLSX.utils.aoa_to_sheet([
+      ["Status","Skor per uraian","Jumlah uraian","Subtotal skor"],
+      ["Sesuai",1,c.Sesuai,c.Sesuai],
+      ["Sebagian",0.5,c.Sebagian,c.Sebagian*0.5],
+      ["Tidak sesuai",0,c.Tidak,0],
+      ["Total","",T.n,T.t],
+      [`Tingkat kesesuaian (total skor ÷ ${T.n} UTW)`,"","",fmt(T.p)+"%"]
+    ]);
+    ws2["!cols"]=[{wch:42},{wch:16},{wch:15},{wch:15}];
+    XLSX.utils.book_append_sheet(wb,ws2,"Ringkasan");
+    const ws3=XLSX.utils.aoa_to_sheet([
+      ["FTE tanpa padanan di UTW"],
+      ...(R.fx.length?R.fx.map(n=>[R.F[n-1]||""]):[["Semua FTE punya padanan."]])
+    ]);
+    ws3["!cols"]=[{wch:100}];
+    XLSX.utils.book_append_sheet(wb,ws3,"FTE tanpa padanan");
+    const out=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+    saveBlob(new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"Pencocokan_UTW_FTE.xlsx");msg("");
+  }catch(e){msg("Gagal mengunduh: "+(e.message||e),1)}
+}
+$("#dl").onclick=()=>{if(!R)return;$("#fmtdl").value==="xlsx"?dlExcel():dlWord()};
 </script>
 </body>
 </html>
