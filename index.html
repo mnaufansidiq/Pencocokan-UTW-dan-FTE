@@ -57,7 +57,7 @@ td .chip{display:inline-block;font-size:12px;padding:3px 9px}
 </div>
 <div class="hint">Isi kotak 1 dan 2 terisi otomatis dari file Excel di atas. Kamu bisa mengedit atau menempel teks langsung di sini sebelum dicocokkan.</div>
 
-<div class="bar"><button class="btn" id="go">Cocokkan dengan AI</button><span id="msg"></span></div>
+<div class="bar"><button class="btn" id="go">Cocokkan dengan AI</button><label class="hint" style="margin:0"><input type="checkbox" id="ver"> Periksa ulang (lebih teliti, tapi kuota AI 2x lipat)</label><span id="msg"></span></div>
 
 <section id="out" class="hidden">
 
@@ -150,13 +150,14 @@ async function callWorker(prompt,ms=90000){
       clearTimeout(t);
       let d=null;try{d=await r.json()}catch(e){}
       if(!r.ok){
-        if(a===1&&(r.status===429||r.status>=500)){await new Promise(x=>setTimeout(x,1000));continue}
-        throw new Error(d&&d.error?d.error:"Worker mengembalikan status "+r.status);
+        const em=d&&d.error?String(d.error):"",q=/kuota|quota|4006|habis|exhaust|RESOURCE_EXHAUSTED/i.test(em);
+        if(!q&&a===1&&(r.status===429||r.status>=500)){await new Promise(x=>setTimeout(x,1000));continue}
+        const er=new Error(em||"Worker mengembalikan status "+r.status);er.quota=q;throw er;
       }
       const text=(d&&d.text||"").trim();
       if(!text)throw new Error("AI tidak memberikan hasil.");
       return {text,provider:(d&&d.provider)||"?",modelUsed:(d&&d.modelUsed)||"?"};
-    }catch(e){clearTimeout(t);last=e.name==="AbortError"?new Error("AI tidak merespons (timeout)."):e;if(a===2)break}
+    }catch(e){clearTimeout(t);last=e.name==="AbortError"?new Error("AI tidak merespons (timeout)."):e;if(a===2||e.quota)break}
   }
   throw last;
 }
@@ -212,14 +213,14 @@ async function askRound(prompt,models){
   let j;
   for(let a=1;a<=2;a++){
     try{const r=await callWorker(prompt);models.add(r.provider+" ("+r.modelUsed+")");j=parseJ(r.text);break}
-    catch(e){if(a===2)throw e}
+    catch(e){if(a===2||e.quota)throw e}
   }
   return j.hasil||[];
 }
 async function askPart(items,F,models){
   const done=new Map(),raw=new Map();
   let todo=items;
-  for(let round=1;round<=3&&todo.length;round++){
+  for(let round=1;round<=2&&todo.length;round++){
     const got=await askRound(mkPrompt(todo,F),models);
     todo.forEach(([n,x])=>{const h=got.find(g=>Number(g.u)===n);if(h)raw.set(n,h);const c=cleanItem(h&&{...h,u:n},F.length,x,false);if(c)done.set(n,c)});
     todo=items.filter(([n])=>!done.has(n));
@@ -243,7 +244,7 @@ $("#go").onclick=async()=>{
       (await askPart(items,F,models)).forEach(h=>hasil.push(h));
     }
     const cand=hasil.filter(h=>h.s!=="Tidak");
-    for(let st=0;st<cand.length;st+=CHUNK){
+    for(let st=0;$("#ver").checked&&st<cand.length;st+=CHUNK){
       msg("Tahap 2: AI memeriksa ulang kecocokan yang terlalu longgar…");
       const part=cand.slice(st,st+CHUNK).map(h=>({n:h.u,u:h.u,text:U[h.u-1],s:h.s,f:h.f}));
       let v=null;try{v=await verifyPart(part,F,models)}catch(e){v=null}
@@ -254,7 +255,7 @@ $("#go").onclick=async()=>{
     render();
     const m=[...models].join(", "),fb=/workers-ai/i.test(m);
     msg("Dihasilkan oleh: "+m+(fb?" — ini model cadangan, hasilnya bisa kurang teliti. Coba lagi nanti saat model utama tersedia.":""),fb);
-  }catch(e){msg("Gagal memproses: "+(e.message||e)+". Coba lagi, atau periksa Worker dan kuota AI.",1)}
+  }catch(e){msg(e.quota?"Kuota AI habis di semua model. Coba lagi besok pagi (kuota harian biasanya reset sekitar pukul 07.00 WIB), atau periksa kuota dan nama model di Worker. Detail: "+(e.message||e):"Gagal memproses: "+(e.message||e)+". Coba lagi, atau periksa Worker dan kuota AI.",1)}
   $("#go").disabled=false;
 };
 
